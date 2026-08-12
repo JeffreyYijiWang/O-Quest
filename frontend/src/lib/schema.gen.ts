@@ -423,7 +423,7 @@ export interface components {
             entries: components["schemas"]["LeaderboardEntry"][];
             has_next: boolean;
             /** Format: int64 */
-            next_cursor?: number | null;
+            next_cursor?: string | null;
         };
         Model: {
             dorm?: string | null;
@@ -825,7 +825,7 @@ export interface operations {
                 /** @description Number of entries to return (max 100, default 20) */
                 limit?: number;
                 /** @description Cursor for pagination - rank to start after */
-                after_rank?: number;
+                cursor?: string;
             };
             header?: never;
             path?: never;

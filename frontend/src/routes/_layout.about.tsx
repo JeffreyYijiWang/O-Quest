@@ -1,4 +1,4 @@
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { ButtonHTMLAttributes } from "react";
 import Scotty from "@/assets/about-page-scotty.svg?react";
 import {

@@ -55,9 +55,24 @@ pub async fn create_connection() -> Result<DatabaseConnection, DbErr> {
 
     let database_url =
         dotenvy::var("DATABASE_URL").expect("DATABASE_URL environment variable must be set");
-    let opt = ConnectOptions::new(database_url);
-
-    // Set connection pool options here
+    let max_connections = dotenvy::var("DATABASE_MAX_CONNECTIONS")
+        .or_else(|_| dotenvy::var("DB_MAX_CONNECTIONS"))
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(64);
+    let min_connections = dotenvy::var("DATABASE_MIN_CONNECTIONS")
+        .or_else(|_| dotenvy::var("DB_MIN_CONNECTIONS"))
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(8);
+    let mut opt = ConnectOptions::new(database_url);
+    opt.max_connections(max_connections)
+        .min_connections(min_connections.min(max_connections))
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .acquire_timeout(std::time::Duration::from_secs(5))
+        .idle_timeout(std::time::Duration::from_secs(5 * 60))
+        .max_lifetime(std::time::Duration::from_secs(30 * 60))
+        .sqlx_logging(false);
 
     Database::connect(opt).await
 }

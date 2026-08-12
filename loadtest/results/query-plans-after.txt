@@ -1,0 +1,243 @@
+Pager usage is off.
+AFTER: single indexed transaction fetch used for the complete rewards page
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on public.transaction  (cost=4.35..33.22 rows=8 width=55) (actual time=0.060..0.094 rows=8 loops=1)
+   Output: id, user_id, reward_name, count, "timestamp", status
+   Recheck Cond: (transaction.user_id = 'hist-00001'::text)
+   Heap Blocks: exact=8
+   Buffers: shared hit=8 read=2
+   ->  Bitmap Index Scan on idx_transaction_user_status  (cost=0.00..4.35 rows=8 width=0) (actual time=0.044..0.044 rows=8 loops=1)
+         Index Cond: (transaction.user_id = 'hist-00001'::text)
+         Buffers: shared read=2
+ Planning:
+   Buffers: shared hit=150 read=4
+ Planning Time: 1.603 ms
+ Execution Time: 0.234 ms
+(12 rows)
+
+AFTER: database-side coin aggregate
+                                                                   QUERY PLAN                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=34.56..34.57 rows=1 width=8) (actual time=0.165..0.169 rows=1 loops=1)
+   Output: COALESCE(sum((t.count * r.cost)), '0'::bigint)
+   Buffers: shared hit=11
+   ->  Hash Join  (cost=5.62..34.52 rows=8 width=8) (actual time=0.133..0.159 rows=8 loops=1)
+         Output: t.count, r.cost
+         Inner Unique: true
+         Hash Cond: (t.reward_name = r.name)
+         Buffers: shared hit=11
+         ->  Bitmap Heap Scan on public.transaction t  (cost=4.35..33.22 rows=8 width=12) (actual time=0.046..0.065 rows=8 loops=1)
+               Output: t.id, t.user_id, t.reward_name, t.count, t."timestamp", t.status
+               Recheck Cond: (t.user_id = 'hist-00001'::text)
+               Heap Blocks: exact=8
+               Buffers: shared hit=10
+               ->  Bitmap Index Scan on idx_transaction_user_status  (cost=0.00..4.35 rows=8 width=0) (actual time=0.032..0.033 rows=8 loops=1)
+                     Index Cond: (t.user_id = 'hist-00001'::text)
+                     Buffers: shared hit=2
+         ->  Hash  (cost=1.12..1.12 rows=12 width=14) (actual time=0.039..0.040 rows=12 loops=1)
+               Output: r.cost, r.name
+               Buckets: 1024  Batches: 1  Memory Usage: 9kB
+               Buffers: shared hit=1
+               ->  Seq Scan on public.reward r  (cost=0.00..1.12 rows=12 width=14) (actual time=0.016..0.019 rows=12 loops=1)
+                     Output: r.cost, r.name
+                     Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=167
+ Planning Time: 3.250 ms
+ Execution Time: 0.385 ms
+(27 rows)
+
+AFTER: dorm-wide Carnegie Cup aggregate
+                                                                          QUERY PLAN                                                                           
+---------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=15.62..15.63 rows=1 width=8) (actual time=0.090..0.092 rows=1 loops=1)
+   Output: COALESCE(sum(t.count), '0'::bigint)
+   Buffers: shared read=3
+   ->  Nested Loop  (cost=0.70..15.62 rows=1 width=4) (actual time=0.082..0.084 rows=0 loops=1)
+         Output: t.count
+         Inner Unique: true
+         Buffers: shared read=3
+         ->  Index Scan using idx_transaction_reward_user on public.transaction t  (cost=0.41..7.30 rows=1 width=15) (actual time=0.081..0.082 rows=0 loops=1)
+               Output: t.id, t.user_id, t.reward_name, t.count, t."timestamp", t.status
+               Index Cond: (t.reward_name = 'Carnegie Cup Contribution'::text)
+               Buffers: shared read=3
+         ->  Index Scan using user_pkey on public."user" u  (cost=0.28..8.30 rows=1 width=11) (never executed)
+               Output: u.user_id, u.name, u.dorm, u.is_admin
+               Index Cond: (u.user_id = t.user_id)
+               Filter: (u.dorm = 'Mudge'::text)
+ Planning:
+   Buffers: shared hit=39 read=1
+ Planning Time: 1.780 ms
+ Execution Time: 0.194 ms
+(19 rows)
+
+AFTER: one uncached user rank lookup
+                                                                                 QUERY PLAN                                                                                 
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Subquery Scan on ranked_users  (cost=4493.11..4668.09 rows=1 width=8) (actual time=87.090..87.098 rows=0 loops=1)
+   Output: ranked_users.rank
+   Filter: (ranked_users.user_id = 'load-0001'::text)
+   Rows Removed by Filter: 5000
+   Buffers: shared hit=1306
+   ->  WindowAgg  (cost=4493.11..4605.59 rows=5000 width=49) (actual time=85.499..86.782 rows=5000 loops=1)
+         Output: u.user_id, row_number() OVER (?), (COALESCE(earned.total_earned, '0'::bigint)), u.name
+         Buffers: shared hit=1306
+         ->  Sort  (cost=4493.09..4505.59 rows=5000 width=41) (actual time=85.471..85.737 rows=5000 loops=1)
+               Output: u.user_id, (COALESCE(earned.total_earned, '0'::bigint)), u.name
+               Sort Key: (COALESCE(earned.total_earned, '0'::bigint)) DESC, u.name, u.user_id
+               Sort Method: quicksort  Memory: 505kB
+               Buffers: shared hit=1306
+               ->  Hash Left Join  (cost=4075.76..4185.89 rows=5000 width=41) (actual time=75.669..77.279 rows=5000 loops=1)
+                     Output: u.user_id, COALESCE(earned.total_earned, '0'::bigint), u.name
+                     Inner Unique: true
+                     Hash Cond: (u.user_id = earned.user_id)
+                     Buffers: shared hit=1300
+                     ->  Seq Scan on public."user" u  (cost=0.00..97.00 rows=5000 width=33) (actual time=0.010..0.546 rows=5000 loops=1)
+                           Output: u.user_id, u.name, u.dorm, u.is_admin
+                           Filter: (NOT u.is_admin)
+                           Buffers: shared hit=47
+                     ->  Hash  (cost=4013.30..4013.30 rows=4997 width=19) (actual time=75.604..75.608 rows=5000 loops=1)
+                           Output: earned.total_earned, earned.user_id
+                           Buckets: 8192  Batches: 1  Memory Usage: 314kB
+                           Buffers: shared hit=1253
+                           ->  Subquery Scan on earned  (cost=3913.36..4013.30 rows=4997 width=19) (actual time=73.635..74.649 rows=5000 loops=1)
+                                 Output: earned.total_earned, earned.user_id
+                                 Buffers: shared hit=1253
+                                 ->  HashAggregate  (cost=3913.36..3963.33 rows=4997 width=19) (actual time=73.634..74.195 rows=5000 loops=1)
+                                       Output: c.user_id, sum(ch.scotty_coins)
+                                       Group Key: c.user_id
+                                       Batches: 1  Memory Usage: 721kB
+                                       Buffers: shared hit=1253
+                                       ->  Hash Join  (cost=5.70..3163.36 rows=150000 width=15) (actual time=0.091..45.399 rows=150000 loops=1)
+                                             Output: c.user_id, ch.scotty_coins
+                                             Inner Unique: true
+                                             Hash Cond: (c.challenge_name = ch.name)
+                                             Buffers: shared hit=1253
+                                             ->  Seq Scan on public.completion c  (cost=0.00..2750.00 rows=150000 width=25) (actual time=0.004..11.679 rows=150000 loops=1)
+                                                   Output: c.user_id, c.challenge_name, c."timestamp", c.s3_link, c.note
+                                                   Buffers: shared hit=1250
+                                             ->  Hash  (cost=4.20..4.20 rows=120 width=18) (actual time=0.057..0.058 rows=120 loops=1)
+                                                   Output: ch.scotty_coins, ch.name
+                                                   Buckets: 1024  Batches: 1  Memory Usage: 14kB
+                                                   Buffers: shared hit=3
+                                                   ->  Seq Scan on public.challenges ch  (cost=0.00..4.20 rows=120 width=18) (actual time=0.004..0.020 rows=120 loops=1)
+                                                         Output: ch.scotty_coins, ch.name
+                                                         Buffers: shared hit=3
+ Planning:
+   Buffers: shared hit=124 read=7
+ Planning Time: 1.738 ms
+ Execution Time: 87.610 ms
+(53 rows)
+
+AFTER: snapshot-stable first leaderboard page
+                                                                                                               QUERY PLAN                                                                                                                
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=10478.63..10479.28 rows=20 width=74) (actual time=202.743..202.810 rows=20 loops=1)
+   Output: ranked_users.rank, ranked_users.user_id, ranked_users.name, ranked_users.dorm, ranked_users.coins_earned, ranked_users.coins_spent, ranked_users.challenges_completed
+   Buffers: shared hit=2992
+   ->  Subquery Scan on ranked_users  (cost=10478.63..10641.11 rows=5000 width=74) (actual time=202.740..202.801 rows=20 loops=1)
+         Output: ranked_users.rank, ranked_users.user_id, ranked_users.name, ranked_users.dorm, ranked_users.coins_earned, ranked_users.coins_spent, ranked_users.challenges_completed
+         Buffers: shared hit=2992
+         ->  WindowAgg  (cost=10478.63..10591.11 rows=5000 width=75) (actual time=202.736..202.789 rows=20 loops=1)
+               Output: u.user_id, u.name, u.dorm, NULL::boolean, (COALESCE(earned.total_earned, '0'::bigint)), COALESCE((sum((t.count * r.cost))), '0'::bigint), COALESCE(completed.challenge_count, '0'::bigint), row_number() OVER (?)
+               Buffers: shared hit=2992
+               ->  Sort  (cost=10478.61..10491.11 rows=5000 width=66) (actual time=202.660..202.694 rows=20 loops=1)
+                     Output: u.user_id, u.name, (COALESCE(earned.total_earned, '0'::bigint)), u.dorm, (sum((t.count * r.cost))), completed.challenge_count
+                     Sort Key: (COALESCE(earned.total_earned, '0'::bigint)) DESC, u.name, u.user_id
+                     Sort Method: quicksort  Memory: 646kB
+                     Buffers: shared hit=2992
+                     ->  Hash Left Join  (cost=10032.01..10171.42 rows=5000 width=66) (actual time=175.086..180.602 rows=5000 loops=1)
+                           Output: u.user_id, u.name, COALESCE(earned.total_earned, '0'::bigint), u.dorm, (sum((t.count * r.cost))), completed.challenge_count
+                           Inner Unique: true
+                           Hash Cond: (u.user_id = completed.user_id)
+                           Buffers: shared hit=2992
+                           ->  Hash Left Join  (cost=5994.61..6120.88 rows=5000 width=58) (actual time=124.985..129.217 rows=5000 loops=1)
+                                 Output: u.user_id, u.name, u.dorm, earned.total_earned, (sum((t.count * r.cost)))
+                                 Inner Unique: true
+                                 Hash Cond: (u.user_id = earned.user_id)
+                                 Buffers: shared hit=1742
+                                 ->  Hash Right Join  (cost=1543.85..1656.99 rows=5000 width=50) (actual time=32.313..35.093 rows=5000 loops=1)
+                                       Output: u.user_id, u.name, u.dorm, (sum((t.count * r.cost)))
+                                       Inner Unique: true
+                                       Hash Cond: (t.user_id = u.user_id)
+                                       Buffers: shared hit=489
+                                       ->  HashAggregate  (cost=1384.35..1434.35 rows=5000 width=19) (actual time=30.199..31.245 rows=5000 loops=1)
+                                             Output: t.user_id, sum((t.count * r.cost))
+                                             Group Key: t.user_id
+                                             Batches: 1  Memory Usage: 721kB
+                                             Buffers: shared hit=442
+                                             ->  Hash Join  (cost=1.27..1084.35 rows=40000 width=19) (actual time=0.044..17.643 rows=40000 loops=1)
+                                                   Output: t.user_id, t.count, r.cost
+                                                   Inner Unique: true
+                                                   Hash Cond: (t.reward_name = r.name)
+                                                   Buffers: shared hit=442
+                                                   ->  Seq Scan on public.transaction t  (cost=0.00..941.00 rows=40000 width=23) (actual time=0.008..6.840 rows=40000 loops=1)
+                                                         Output: t.id, t.user_id, t.reward_name, t.count, t."timestamp", t.status
+                                                         Filter: (t."timestamp" <= '2026-08-10 00:00:00'::timestamp without time zone)
+                                                         Buffers: shared hit=441
+                                                   ->  Hash  (cost=1.12..1.12 rows=12 width=14) (actual time=0.014..0.017 rows=12 loops=1)
+                                                         Output: r.cost, r.name
+                                                         Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                                         Buffers: shared hit=1
+                                                         ->  Seq Scan on public.reward r  (cost=0.00..1.12 rows=12 width=14) (actual time=0.003..0.004 rows=12 loops=1)
+                                                               Output: r.cost, r.name
+                                                               Buffers: shared hit=1
+                                       ->  Hash  (cost=97.00..97.00 rows=5000 width=42) (actual time=2.038..2.039 rows=5000 loops=1)
+                                             Output: u.user_id, u.name, u.dorm
+                                             Buckets: 8192  Batches: 1  Memory Usage: 427kB
+                                             Buffers: shared hit=47
+                                             ->  Seq Scan on public."user" u  (cost=0.00..97.00 rows=5000 width=42) (actual time=0.012..0.663 rows=5000 loops=1)
+                                                   Output: u.user_id, u.name, u.dorm
+                                                   Filter: (NOT u.is_admin)
+                                                   Buffers: shared hit=47
+                                 ->  Hash  (cost=4388.30..4388.30 rows=4997 width=19) (actual time=92.546..92.555 rows=5000 loops=1)
+                                       Output: earned.total_earned, earned.user_id
+                                       Buckets: 8192  Batches: 1  Memory Usage: 314kB
+                                       Buffers: shared hit=1253
+                                       ->  Subquery Scan on earned  (cost=4288.36..4388.30 rows=4997 width=19) (actual time=90.717..91.629 rows=5000 loops=1)
+                                             Output: earned.total_earned, earned.user_id
+                                             Buffers: shared hit=1253
+                                             ->  HashAggregate  (cost=4288.36..4338.33 rows=4997 width=19) (actual time=90.714..91.208 rows=5000 loops=1)
+                                                   Output: c.user_id, sum(ch.scotty_coins)
+                                                   Group Key: c.user_id
+                                                   Batches: 1  Memory Usage: 721kB
+                                                   Buffers: shared hit=1253
+                                                   ->  Hash Join  (cost=5.70..3538.36 rows=150000 width=15) (actual time=0.129..55.008 rows=150000 loops=1)
+                                                         Output: c.user_id, ch.scotty_coins
+                                                         Inner Unique: true
+                                                         Hash Cond: (c.challenge_name = ch.name)
+                                                         Buffers: shared hit=1253
+                                                         ->  Seq Scan on public.completion c  (cost=0.00..3125.00 rows=150000 width=25) (actual time=0.019..18.819 rows=150000 loops=1)
+                                                               Output: c.user_id, c.challenge_name, c."timestamp", c.s3_link, c.note
+                                                               Filter: (c."timestamp" <= '2026-08-10 00:00:00'::timestamp without time zone)
+                                                               Buffers: shared hit=1250
+                                                         ->  Hash  (cost=4.20..4.20 rows=120 width=18) (actual time=0.072..0.074 rows=120 loops=1)
+                                                               Output: ch.scotty_coins, ch.name
+                                                               Buckets: 1024  Batches: 1  Memory Usage: 14kB
+                                                               Buffers: shared hit=3
+                                                               ->  Seq Scan on public.challenges ch  (cost=0.00..4.20 rows=120 width=18) (actual time=0.007..0.026 rows=120 loops=1)
+                                                                     Output: ch.scotty_coins, ch.name
+                                                                     Buffers: shared hit=3
+                           ->  Hash  (cost=3974.94..3974.94 rows=4997 width=19) (actual time=50.040..50.044 rows=5000 loops=1)
+                                 Output: completed.challenge_count, completed.user_id
+                                 Buckets: 8192  Batches: 1  Memory Usage: 314kB
+                                 Buffers: shared hit=1250
+                                 ->  Subquery Scan on completed  (cost=3875.00..3974.94 rows=4997 width=19) (actual time=48.124..49.088 rows=5000 loops=1)
+                                       Output: completed.challenge_count, completed.user_id
+                                       Buffers: shared hit=1250
+                                       ->  HashAggregate  (cost=3875.00..3924.97 rows=4997 width=19) (actual time=48.123..48.655 rows=5000 loops=1)
+                                             Output: completion.user_id, count(*)
+                                             Group Key: completion.user_id
+                                             Batches: 1  Memory Usage: 721kB
+                                             Buffers: shared hit=1250
+                                             ->  Seq Scan on public.completion  (cost=0.00..3125.00 rows=150000 width=11) (actual time=0.016..16.279 rows=150000 loops=1)
+                                                   Output: completion.user_id, completion.challenge_name, completion."timestamp", completion.s3_link, completion.note
+                                                   Filter: (completion."timestamp" <= '2026-08-10 00:00:00'::timestamp without time zone)
+                                                   Buffers: shared hit=1250
+ Planning:
+   Buffers: shared hit=24
+ Planning Time: 1.156 ms
+ Execution Time: 205.270 ms
+(106 rows)
+

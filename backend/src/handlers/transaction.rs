@@ -130,18 +130,8 @@ pub async fn create_transaction(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Decrement the stock if stock tracking is enabled
-    if reward.stock != -1 {
-        state
-            .reward_service
-            .decrement_stock(&payload.reward_name, payload.count)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    }
-
     // Invalidate caches affected by this transaction
     state.cache_manager.invalidate_user_data(&claims.sub).await;
-    state.cache_manager.invalidate_leaderboard().await;
     state.cache_manager.invalidate_rewards().await;
 
     Ok(Json(CreateTransactionResponse {
@@ -241,7 +231,6 @@ pub async fn cancel_transaction(
 
         // Invalidate caches affected by transaction cancellation
         state.cache_manager.invalidate_user_data(&claims.sub).await;
-        state.cache_manager.invalidate_leaderboard().await;
         state.cache_manager.invalidate_rewards().await;
     }
 

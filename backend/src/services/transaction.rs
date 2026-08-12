@@ -1,13 +1,10 @@
-use std::{
-    collections::HashMap,
-    io::{self, Write},
-};
+use std::collections::HashMap;
 
-use crate::entities::{prelude::*, reward, transaction, user};
+use crate::entities::{prelude::*, transaction, user};
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, JoinType,
-    QueryFilter, QuerySelect, RelationTrait, prelude::Expr,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
+    EntityTrait, QueryFilter, QuerySelect, Statement, TransactionTrait,
 };
 use uuid::Uuid;
 
@@ -28,18 +25,11 @@ impl TransactionService {
             .filter(user::Column::Dorm.eq(user_dorm))
             .select_only()
             .column_as(transaction::Column::Count.sum(), "total")
-            .into_tuple::<i64>()
+            .into_tuple::<Option<i64>>()
             .one(&self.db)
-            .await
-            .inspect_err(|f| {
-                eprintln!(
-                    "Failed to get total purchased for Carnegie Cup Contribution: {}",
-                    f
-                );
-                io::stderr().flush().unwrap_or_default();
-            });
+            .await?;
 
-        Ok(total.ok().unwrap_or(Some(0)).unwrap_or(0))
+        Ok(total.flatten().unwrap_or(0))
     }
 
     pub async fn create_transaction(
@@ -48,6 +38,28 @@ impl TransactionService {
         reward_name: &str,
         count: i32,
     ) -> Result<transaction::Model, sea_orm::DbErr> {
+        let database_transaction = self.db.begin().await?;
+
+        let stock_updated = database_transaction
+            .query_one(Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Postgres,
+                r#"
+                UPDATE reward
+                SET stock = CASE WHEN stock = -1 THEN -1 ELSE stock - $1 END
+                WHERE name = $2 AND (stock = -1 OR stock >= $1)
+                RETURNING name
+                "#,
+                vec![count.into(), reward_name.into()],
+            ))
+            .await?;
+
+        if stock_updated.is_none() {
+            database_transaction.rollback().await?;
+            return Err(sea_orm::DbErr::Custom(
+                "Reward not found or insufficient stock".to_string(),
+            ));
+        }
+
         let transaction_id = Uuid::new_v4();
 
         let new_transaction = transaction::ActiveModel {
@@ -58,7 +70,9 @@ impl TransactionService {
             status: Set("pending".to_string()),
             count: Set(count),
         };
-        new_transaction.insert(&self.db).await
+        let created = new_transaction.insert(&database_transaction).await?;
+        database_transaction.commit().await?;
+        Ok(created)
     }
 
     // Get total counts for a user across all transactions (for trade limits)
@@ -66,34 +80,50 @@ impl TransactionService {
         &self,
         user_id: &str,
     ) -> Result<HashMap<String, i32>, sea_orm::DbErr> {
-        let transactions = Transaction::find()
+        let totals = Transaction::find()
             .filter(transaction::Column::UserId.eq(user_id))
+            .select_only()
+            .column(transaction::Column::RewardName)
+            .column_as(transaction::Column::Count.sum(), "total")
+            .group_by(transaction::Column::RewardName)
+            .into_tuple::<(String, i64)>()
             .all(&self.db)
             .await?;
 
-        let mut totals: HashMap<String, i32> = HashMap::new();
-        for transaction in transactions {
-            *totals.entry(transaction.reward_name).or_insert(0) += transaction.count;
-        }
-
-        Ok(totals)
+        Ok(totals
+            .into_iter()
+            .map(|(name, count)| (name, count as i32))
+            .collect::<HashMap<_, _>>())
     }
 
     // Get total coins spent by user
     pub async fn get_user_total_coins_spent(&self, user_id: &str) -> Result<i32, sea_orm::DbErr> {
-        let transactions_with_costs = Transaction::find()
-            .filter(transaction::Column::UserId.eq(user_id))
-            .join(JoinType::InnerJoin, transaction::Relation::Reward.def())
-            .select_only()
-            .column_as(
-                Expr::col(reward::Column::Cost).mul(Expr::col(transaction::Column::Count)),
-                "total_cost",
-            )
-            .into_tuple::<i32>()
-            .all(&self.db)
-            .await?;
+        let row = self
+            .db
+            .query_one(Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Postgres,
+                r#"
+                SELECT COALESCE(SUM(t.count * r.cost), 0)::BIGINT AS total
+                FROM "transaction" t
+                JOIN reward r ON r.name = t.reward_name
+                WHERE t.user_id = $1
+                "#,
+                vec![user_id.into()],
+            ))
+            .await?
+            .ok_or_else(|| sea_orm::DbErr::Custom("Missing aggregate row".to_string()))?;
+        let total: i64 = row.try_get("", "total")?;
+        i32::try_from(total).map_err(|_| sea_orm::DbErr::Custom("Coin total overflow".to_string()))
+    }
 
-        Ok(transactions_with_costs.into_iter().sum())
+    pub async fn get_user_transactions(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<transaction::Model>, sea_orm::DbErr> {
+        Transaction::find()
+            .filter(transaction::Column::UserId.eq(user_id))
+            .all(&self.db)
+            .await
     }
 
     // Get user transactions for a specific reward (for rewards page)

@@ -38,7 +38,7 @@
 	},
 	"plugins": {
 		"deep-link": {
-			"mobile": [{ "host": "quest.scottylabs.org" }, { "host": "cmu.quest" }],
+			"mobile": [],
 			"desktop": {
 				"schemes": ["quest"]
 			}

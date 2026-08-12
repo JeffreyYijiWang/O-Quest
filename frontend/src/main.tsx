@@ -27,7 +27,9 @@ const router = createRouter({
 	routeTree,
 	scrollRestoration: true,
 	defaultViewTransition: true,
-	context: { baseUrl: "https://api.cmu.quest", queryClient },
+	// AppProvider supplies the actual value before any route is rendered. Keep the
+	// type-level default local so initialization can never contact a retired API.
+	context: { baseUrl: "http://localhost:3000", queryClient },
 });
 
 // Register the router instance for type safety

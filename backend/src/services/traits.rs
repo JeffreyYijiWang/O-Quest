@@ -1,4 +1,5 @@
 use crate::entities::{challenges, completion, reward};
+use crate::services::leaderboard::LeaderboardCursor;
 use crate::services::leaderboard::LeaderboardEntry;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
@@ -106,7 +107,10 @@ pub trait LeaderboardServiceTrait: Clone + Send + Sync {
     async fn get_leaderboard_page(
         &self,
         limit: u64,
-        after_rank: Option<i64>,
+        cursor: Option<&LeaderboardCursor>,
     ) -> Result<Vec<LeaderboardEntry>, sea_orm::DbErr>;
     async fn get_user_leaderboard_position(&self, user_id: &str) -> Result<i64, sea_orm::DbErr>;
+    async fn get_all_user_leaderboard_positions(
+        &self,
+    ) -> Result<HashMap<String, i64>, sea_orm::DbErr>;
 }

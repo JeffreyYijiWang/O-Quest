@@ -34,7 +34,7 @@ function Leaderboard() {
 				getNextPageParam: (lastPage: LeaderboardResponse) =>
 					lastPage.has_next ? lastPage.next_cursor : undefined,
 				initialPageParam: undefined,
-				pageParamName: "after_rank", // which query param to use for pagination
+				pageParamName: "cursor",
 			},
 		);
 

@@ -10,6 +10,11 @@ export type FilterOption = components["schemas"]["ChallengeStatus"] | "all";
 export type AdminMode = "challenges" | "verify";
 
 const getApiConfig = (): string => {
+	const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+	if (configuredBaseUrl) {
+		return configuredBaseUrl.replace(/\/$/, "");
+	}
+
 	const { hostname } = window.location;
 
 	if (
@@ -20,12 +25,9 @@ const getApiConfig = (): string => {
 		return "http://localhost:3000";
 	}
 
-	if (hostname === "cmu.quest") {
-		return "https://api.cmu.quest";
-	}
-
-	// Default to prod API for all other cases
-	return "https://api.cmu.quest";
+	// Web deployments use a same-origin API by default. Native builds should set
+	// VITE_API_BASE_URL to the address of the replacement backend.
+	return window.location.origin;
 };
 
 const createApiClient = (baseUrl: string) => {
@@ -48,7 +50,7 @@ const createApiClient = (baseUrl: string) => {
 
 		async login(path: string) {
 			const isAuthd = await new Promise<boolean>((resolve) => {
-				fetch(`${baseUrl}/api/profile`).then((res) => {
+				fetch(`${baseUrl}/api/profile`, { credentials: "include" }).then((res) => {
 					if (res.ok) {
 						resolve(true);
 					} else {
@@ -59,16 +61,6 @@ const createApiClient = (baseUrl: string) => {
 
 			if (isAuthd) {
 				window.location.href = new URL(path, window.location.origin).toString();
-				return;
-			}
-
-			const isDev = ["localhost", "tauri.localhost"].includes(
-				window.location.hostname,
-			);
-
-			// auth mocked in dev
-			if (isDev) {
-				window.location.href = path;
 				return;
 			}
 

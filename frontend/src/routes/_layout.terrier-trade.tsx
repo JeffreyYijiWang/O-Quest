@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { PrizeCard } from "@/components/trade/prize-card";
 import { useApi } from "@/lib/app-context";
 import { requireAuth } from "@/lib/auth";

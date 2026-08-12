@@ -1,12 +1,12 @@
 use axum::http::Method;
+use axum::routing::{get, post};
 use std::sync::Arc;
 use tokio::signal;
 use tower_http::cors::CorsLayer;
 use utoipa::OpenApi;
 use utoipa_axum::{router::OpenApiRouter, routes};
-use utoipa_swagger_ui::SwaggerUi;
 
-use backend::auth::{build_oauth2_resource_server, dev_auth_middleware};
+use backend::auth;
 use backend::cache::{
     CacheManager, CachedChallengeService, CachedCompletionService, CachedLeaderboardService,
     CachedRewardService,
@@ -30,7 +30,7 @@ use backend::{create_connection, handlers};
     tag = "public"
 )]
 async fn root() -> &'static str {
-    "Visit /swagger for API documentation"
+    "O-Quest API v2; OpenAPI document: /openapi.json"
 }
 
 #[utoipa::path(
@@ -116,13 +116,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .merge(admin_routes)
         .layer(build_cors_layer())
-        .with_state(state);
+        .with_state(state.clone());
 
-    if cfg!(debug_assertions) && dotenvy::var("ENABLE_DEV_AUTH").is_ok() {
-        protected_routes = protected_routes.layer(axum::middleware::from_fn(dev_auth_middleware));
-    } else {
-        protected_routes = protected_routes.layer(build_oauth2_resource_server().await);
-    }
+    protected_routes = protected_routes.layer(axum::middleware::from_fn(auth::auth_middleware));
 
     let public_routes = OpenApiRouter::new()
         .routes(routes!(root))
@@ -133,7 +129,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(public_routes)
         .split_for_parts();
 
-    let app = router.merge(SwaggerUi::new("/swagger").url("/openapi.json", api));
+    let metrics_cache = state.cache_manager.clone();
+    let openapi = Arc::new(api);
+    let app = router
+        .route(
+            "/openapi.json",
+            get({
+                let openapi = openapi.clone();
+                move || {
+                    let openapi = openapi.clone();
+                    async move { axum::Json((*openapi).clone()) }
+                }
+            }),
+        )
+        .route(
+            "/metrics/cache",
+            get(move || {
+                let cache = metrics_cache.clone();
+                async move { axum::Json(cache.metrics_snapshot()) }
+            }),
+        )
+        .route("/api/auth/session", post(auth::create_session))
+        .route("/oauth2/authorization/quest", get(auth::login_redirect))
+        .route("/logout", post(auth::logout))
+        .layer(axum::middleware::from_fn(
+            backend::middleware::compression::gzip_responses,
+        ));
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
 
     println!("Listening on http://0.0.0.0:3000");
@@ -145,18 +166,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn build_cors_layer() -> CorsLayer {
-    let mut origins = vec![
-        "https://cmu.quest".parse().unwrap(),
-        "https://quest.scottylabs.org".parse().unwrap(),
-    ];
-
-    if cfg!(debug_assertions) && dotenvy::var("ENABLE_DEV_AUTH").is_ok() {
-        origins.extend_from_slice(&[
-            "http://localhost:1420".parse().unwrap(),
-            "http://tauri.localhost".parse().unwrap(),
-            "tauri://localhost".parse().unwrap(),
-        ]);
-    }
+    let configured = std::env::var("CORS_ALLOWED_ORIGINS").unwrap_or_else(|_| {
+        "http://localhost:1420,http://tauri.localhost,tauri://localhost".to_string()
+    });
+    let origins = configured
+        .split(',')
+        .filter_map(|origin| origin.trim().parse().ok())
+        .collect::<Vec<_>>();
 
     CorsLayer::new()
         .allow_origin(origins)

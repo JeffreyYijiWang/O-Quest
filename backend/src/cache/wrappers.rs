@@ -2,10 +2,12 @@ use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, RwLock};
 
 use crate::cache::CacheManager;
 use crate::entities::{challenges, completion, reward};
-use crate::services::leaderboard::LeaderboardEntry;
+use crate::services::leaderboard::{LeaderboardCursor, LeaderboardEntry};
 use crate::services::traits::*;
 
 #[derive(Clone)]
@@ -30,6 +32,13 @@ pub struct CachedRewardService<T: RewardServiceTrait> {
 pub struct CachedLeaderboardService<T: LeaderboardServiceTrait> {
     inner: T,
     cache: Arc<CacheManager>,
+    position_snapshot: Arc<RwLock<Option<PositionSnapshot>>>,
+    position_refresh: Arc<Mutex<()>>,
+}
+
+struct PositionSnapshot {
+    expires_at: Instant,
+    positions: HashMap<String, i64>,
 }
 
 // Challenge service implementation
@@ -349,7 +358,28 @@ impl<T: RewardServiceTrait> RewardServiceTrait for CachedRewardService<T> {
 // Leaderboard service implementation
 impl<T: LeaderboardServiceTrait> CachedLeaderboardService<T> {
     pub fn new(inner: T, cache: Arc<CacheManager>) -> Self {
-        Self { inner, cache }
+        Self {
+            inner,
+            cache,
+            position_snapshot: Arc::new(RwLock::new(None)),
+            position_refresh: Arc::new(Mutex::new(())),
+        }
+    }
+
+    async fn position_from_snapshot(&self, user_id: &str) -> Option<i64> {
+        let snapshot = self.position_snapshot.read().await;
+        let snapshot = snapshot
+            .as_ref()
+            .filter(|value| value.expires_at > Instant::now())?;
+        Some(
+            snapshot
+                .positions
+                .get(user_id)
+                .copied()
+                // A just-created user may not be present until the next refresh.
+                // With no completions yet, the bounded-staleness position is last.
+                .unwrap_or(snapshot.positions.len() as i64 + 1),
+        )
     }
 }
 
@@ -358,26 +388,49 @@ impl<T: LeaderboardServiceTrait> LeaderboardServiceTrait for CachedLeaderboardSe
     async fn get_leaderboard_page(
         &self,
         limit: u64,
-        after_rank: Option<i64>,
+        cursor: Option<&LeaderboardCursor>,
     ) -> Result<Vec<LeaderboardEntry>, sea_orm::DbErr> {
-        if let Some(cached) = self.cache.get_leaderboard_page(limit, after_rank).await {
+        let encoded_cursor = cursor.and_then(|value| value.encode().ok());
+        if let Some(cached) = self
+            .cache
+            .get_leaderboard_page(limit, encoded_cursor.as_deref())
+            .await
+        {
             return Ok(cached);
         }
 
-        let result = self.inner.get_leaderboard_page(limit, after_rank).await?;
+        let result = self.inner.get_leaderboard_page(limit, cursor).await?;
         self.cache
-            .set_leaderboard_page(limit, after_rank, result.clone())
+            .set_leaderboard_page(limit, encoded_cursor.as_deref(), result.clone())
             .await;
         Ok(result)
     }
 
     async fn get_user_leaderboard_position(&self, user_id: &str) -> Result<i64, sea_orm::DbErr> {
-        if let Some(cached) = self.cache.get_user_position(user_id).await {
-            return Ok(cached);
+        if let Some(position) = self.position_from_snapshot(user_id).await {
+            return Ok(position);
         }
 
-        let result = self.inner.get_user_leaderboard_position(user_id).await?;
-        self.cache.set_user_position(user_id, result).await;
-        Ok(result)
+        let _refresh = self.position_refresh.lock().await;
+        if let Some(position) = self.position_from_snapshot(user_id).await {
+            return Ok(position);
+        }
+
+        let positions = self.inner.get_all_user_leaderboard_positions().await?;
+        let position = positions
+            .get(user_id)
+            .copied()
+            .unwrap_or(positions.len() as i64 + 1);
+        *self.position_snapshot.write().await = Some(PositionSnapshot {
+            expires_at: Instant::now() + Duration::from_secs(15),
+            positions,
+        });
+        Ok(position)
+    }
+
+    async fn get_all_user_leaderboard_positions(
+        &self,
+    ) -> Result<HashMap<String, i64>, sea_orm::DbErr> {
+        self.inner.get_all_user_leaderboard_positions().await
     }
 }

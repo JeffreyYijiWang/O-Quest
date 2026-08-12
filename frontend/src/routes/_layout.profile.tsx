@@ -42,31 +42,6 @@ function getDormColor(dormName: string | null | undefined): string {
 	return dormColors[dormGroup].primary || "bg-white";
 }
 
-function getWeeklyActivityStamps(recentActivityDays: string[]): boolean[] {
-	// Convert recent_activity_days to a weekly boolean array
-	const today = new Date();
-	const weekStart = new Date(today);
-	weekStart.setDate(today.getDate() - today.getDay()); // Start of week (Sunday)
-
-	const week = Array(7).fill(false);
-	recentActivityDays.forEach((dateString) => {
-		const activityDate = new Date(dateString);
-		const dayOfWeek = activityDate.getDay(); // 0 = Sunday, 6 = Saturday
-		const weekStartTime = weekStart.getTime();
-		const activityTime = activityDate.getTime();
-
-		// Check if activity is within current week
-		if (
-			activityTime >= weekStartTime &&
-			activityTime < weekStartTime + 7 * 24 * 60 * 60 * 1000
-		) {
-			week[dayOfWeek] = true;
-		}
-	});
-
-	return week;
-}
-
 function Profile() {
 	const { $api } = useApi();
 	const { user } = Route.useRouteContext();

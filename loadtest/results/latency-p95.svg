@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="330" viewBox="0 0 760 330">
+<rect width="100%" height="100%" fill="#fbfbf8" />
+<text x="28" y="44" font-family="system-ui" font-size="25" font-weight="700" fill="#182026">p95 HTTP latency at the 600-VU workload</text>
+<text x="28" y="74" font-family="system-ui" font-size="15" fill="#5c6770">Lower is better - identical workload and seeded data</text>
+<text x="28" y="143" font-family="system-ui" font-size="18">Before</text>
+<rect x="120" y="115" width="452.1739130434783" height="42" rx="6" fill="#e76f51" />
+<text x="582.1739130434783" y="143" font-family="system-ui" font-size="18" font-weight="700">5365.61 ms</text>
+<text x="28" y="238" font-family="system-ui" font-size="18">After</text>
+<rect x="120" y="210" width="9.550312917373784" height="42" rx="6" fill="#2a9d8f" />
+<text x="139.5503129173738" y="238" font-family="system-ui" font-size="18" font-weight="700">113.33 ms</text>
+</svg>

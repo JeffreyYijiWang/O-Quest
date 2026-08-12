@@ -3,6 +3,7 @@ use crate::{AppState, AuthClaims};
 use axum::{Extension, Json, extract::State, http::StatusCode};
 use chrono::NaiveDateTime;
 use serde::Serialize;
+use std::collections::HashMap;
 use utoipa::ToSchema;
 
 const CCUP_LIMIT_BY_DORM: fn(&str) -> i32 = |dorm| match dorm {
@@ -70,15 +71,25 @@ pub async fn get_rewards(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let transactions = state
+        .transaction_service
+        .get_user_transactions(&claims.sub)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut transactions_by_reward = HashMap::new();
+    for transaction in transactions {
+        transactions_by_reward
+            .entry(transaction.reward_name.clone())
+            .or_insert_with(Vec::new)
+            .push(transaction);
+    }
+
     let mut reward_responses = Vec::new();
 
     for reward in rewards {
-        // Get transactions for this specific reward
-        let transactions = state
-            .transaction_service
-            .get_user_reward_transactions(&claims.sub, &reward.name)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let transactions = transactions_by_reward
+            .remove(&reward.name)
+            .unwrap_or_default();
 
         let mut total_purchased = 0;
         let mut incomplete_count = 0;
@@ -130,8 +141,8 @@ pub async fn get_rewards(
         reward_responses.push(RewardResponse {
             name: reward.name.clone(),
             cost: reward.cost,
-            stock: stock,
-            trade_limit: trade_limit,
+            stock,
+            trade_limit,
             transaction_info: RewardTransactionInfo {
                 total_purchased,
                 incomplete_count,

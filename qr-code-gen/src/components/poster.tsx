@@ -57,7 +57,7 @@ export interface Challenge {
 
 export function Poster({ category, name, tagline, secret }: Challenge) {
 	const info = categoryInfo[category as Category];
-	const codeValue = `Scan me from https://cmu.quest! This challenge: ${secret}`;
+	const codeValue = `O-Quest challenge verification: ${secret}`;
 
 	return (
 		<div className="mt-12 font-sans">
@@ -86,7 +86,7 @@ export function Poster({ category, name, tagline, secret }: Challenge) {
 				<div className={`flex absolute bottom-0 w-full ${info.dark} h-[1.5in]`}>
 					<div className="shrink-0 py-4 w-full text-white text-center">
 						<p className="text-lg font-bold underline">
-							Scan this code from https://cmu.quest
+							Scan this code in the O-Quest mobile app
 						</p>
 						<p className="italic text-sm">
 							Do not remove. Property of CMU's First-Year Orientation.

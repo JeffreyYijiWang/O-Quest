@@ -124,16 +124,18 @@ impl CompletionServiceTrait for CompletionService {
     }
 
     async fn get_user_total_coins_earned(&self, user_id: &str) -> Result<i32, sea_orm::DbErr> {
-        let completions_with_coins = Completion::find()
+        let total = Completion::find()
             .filter(completion::Column::UserId.eq(user_id))
             .join(JoinType::InnerJoin, completion::Relation::Challenges.def())
             .select_only()
-            .column_as(challenges::Column::ScottyCoins, "coins")
-            .into_tuple::<i32>()
-            .all(&self.db)
-            .await?;
+            .column_as(challenges::Column::ScottyCoins.sum(), "total")
+            .into_tuple::<Option<i64>>()
+            .one(&self.db)
+            .await?
+            .flatten()
+            .unwrap_or(0);
 
-        Ok(completions_with_coins.into_iter().sum())
+        i32::try_from(total).map_err(|_| sea_orm::DbErr::Custom("Coin total overflow".to_string()))
     }
 
     async fn get_user_completions_with_challenges(

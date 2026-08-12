@@ -181,7 +181,7 @@ pub async fn create_completion(
         .create_completion(
             &claims.sub,
             &payload.challenge_name,
-            if s3_link.len() > 0 {
+            if !s3_link.is_empty() {
                 Some(s3_link)
             } else {
                 None
@@ -197,7 +197,8 @@ pub async fn create_completion(
 
     // Invalidate caches affected by this completion
     state.cache_manager.invalidate_user_data(&claims.sub).await;
-    state.cache_manager.invalidate_leaderboard().await;
+    // Leaderboard pages are 15-second snapshots. Their bounded TTL prevents a
+    // write storm from invalidating a shared hot key on every completion.
 
     Ok(Json(CreateCompletionResponse {
         success: true,
