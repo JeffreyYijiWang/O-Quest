@@ -1,1 +1,5 @@
 .DS_Store
+# Local CA certificates / private trust material
+frontend/docker/certs/
+qr-code-gen/docker/certs/
+backend/docker/certs/

@@ -1,0 +1,38 @@
+services:
+  migrate:
+    build:
+      secrets:
+        - source: backend_local_ca
+          target: local_ca
+
+  seed:
+    build:
+      secrets:
+        - source: backend_local_ca
+          target: local_ca
+
+  backend:
+    build:
+      secrets:
+        - source: backend_local_ca
+          target: local_ca
+
+  frontend:
+    build:
+      secrets:
+        - source: frontend_local_ca
+          target: local_ca
+
+  qr-code-gen:
+    build:
+      secrets:
+        - source: qr_code_gen_local_ca
+          target: local_ca
+
+secrets:
+  backend_local_ca:
+    file: ./backend/docker/certs/corporate-ca.pem
+  frontend_local_ca:
+    file: ./frontend/docker/certs/corporate-ca.pem
+  qr_code_gen_local_ca:
+    file: ./qr-code-gen/docker/certs/corporate-ca.pem

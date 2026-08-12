@@ -2,7 +2,13 @@
 
 O-Quest is a mobile-first campus exploration game for first-year orientation. Students discover campus locations, scan challenge posters, verify their position, earn Scotty Coins, keep a photo journal, compare progress, and redeem rewards. Staff place challenge posters and verify reward pickups.
 
-This repository now runs as a self-contained application. It does **not** connect to the retired O-Quest API or identity servers. The replacement backend owns authentication, querying, caching, durable user data, and media storage through locally configurable services.
+This repository now runs as a self-contained application. It does **not** connect to the O-Quest API or identity servers. The replacement backend owns authentication, querying, caching, durable user data, and media storage through locally configurable services.
+
+Live Application on [O-Quest](https://codeberg.org/scottylabs/quest)
+
+App Store:TO BE PUBLISHED
+
+Android Store:TO BE PUBLISHED
 
 ## What is in this repository
 
@@ -337,6 +343,46 @@ The L1 cache is bounded at 50,000 entries with a five-second TTL. Redis operatio
 - Redis 8
 - MinIO or compatible S3 storage
 - Docker Desktop for the reproducible local stack and load test
+
+### Start the full prototype with Docker Compose
+
+Most developers do not need a custom certificate. Build and run the complete prototype stack with:
+
+```powershell
+docker compose -f docker-compose.prototype.yml up -d --build
+```
+
+This builds `backend`, `frontend`, and `qr-code-gen`, starts PostgreSQL, Redis, and MinIO, runs migrations, seeds prototype data, and serves:
+
+- API: `http://localhost:3000`
+- Frontend: `http://localhost:8080`
+- QR poster generator: `http://localhost:8081`
+
+Persistent PostgreSQL and MinIO data live in the Compose volumes `quest-prototype-postgres` and `quest-prototype-minio`; rebuilding containers does not delete those volumes.
+
+### Optional local CA for HTTPS inspection
+
+The local CA certificate is machine/network-specific and is not required for normal users of the repository.
+
+Use this only when a corporate proxy, Norton Web Shield, VPN, Zscaler, university network, or similar tool re-signs HTTPS traffic and Docker builds fail while downloading packages. Export the organization's or tool's root CA as Base-64 encoded X.509. Do not export a private key.
+
+Place the certificate at the build context that needs it:
+
+```text
+backend/docker/certs/corporate-ca.pem
+frontend/docker/certs/corporate-ca.pem
+qr-code-gen/docker/certs/corporate-ca.pem
+```
+
+The `frontend` and `qr-code-gen` files are used for Bun dependency installation. The `backend` file is used for Cargo dependency downloads because the full prototype Compose workflow also builds the Rust backend. These paths are ignored by Git and should not be committed.
+
+Run the opt-in CA-enabled workflow with:
+
+```powershell
+docker compose -f docker-compose.prototype.yml -f docker-compose.local-ca.yml up -d --build
+```
+
+The override passes each local certificate to BuildKit as a build secret named `local_ca`. The public Dockerfiles do not copy a private certificate path by default, and TLS verification remains enabled.
 
 ### Start the isolated local services
 

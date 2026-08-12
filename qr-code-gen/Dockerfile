@@ -1,10 +1,27 @@
+# syntax=docker/dockerfile:1.7
+
 FROM oven/bun:1 AS base
 
 WORKDIR /app
 
-# Install dependencies
+USER root
+
 COPY package.json bun.lock* ./
-RUN bun install --frozen-lockfile
+
+RUN --mount=type=secret,id=local_ca,required=false \
+	if [ -f /run/secrets/local_ca ]; then \
+		apt-get update \
+		&& apt-get install -y ca-certificates \
+		&& rm -rf /var/lib/apt/lists/* \
+		&& cp /run/secrets/local_ca /usr/local/share/ca-certificates/local-ca.crt \
+		&& update-ca-certificates \
+		&& NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/local-ca.crt \
+			bun install --frozen-lockfile --cafile=/usr/local/share/ca-certificates/local-ca.crt \
+		&& rm -f /usr/local/share/ca-certificates/local-ca.crt /etc/ssl/certs/local-ca.pem \
+		&& update-ca-certificates; \
+	else \
+		bun install --frozen-lockfile; \
+	fi
 
 # Copy source code
 COPY . .
